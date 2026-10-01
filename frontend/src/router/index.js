@@ -10,6 +10,7 @@ export const navItems = [
   { key: 'devices', path: '/devices', icon: '🔩', label: '设备台账', hint: '钢轨/道岔/轨枕/桥隧 多态继承' },
   { key: 'defects', path: '/defects', icon: '🚧', label: '检查与病害', hint: '病害等级筛选·销号闭环' },
   { key: 'orders', path: '/orders', icon: '🗓️', label: '养修作业', hint: '天窗点网格日历·状态推进' },
+  { key: 'handovers', path: '/handovers', icon: '🔓', label: '封锁解除交接台', hint: '已验收作业解除申请·逐项复核·失效重提' },
   { key: 'materials', path: '/materials', icon: '📦', label: '物资与机具', hint: '低库存预警·检修倒计时' }
 ]
 
@@ -20,6 +21,7 @@ const routes = [
   { path: '/devices', name: 'devices', component: () => import('../views/DeviceView.vue') },
   { path: '/defects', name: 'defects', component: () => import('../views/DefectView.vue') },
   { path: '/orders', name: 'orders', component: () => import('../views/WorkOrderView.vue') },
+  { path: '/handovers', name: 'handovers', component: () => import('../views/HandoverView.vue') },
   { path: '/materials', name: 'materials', component: () => import('../views/MaterialView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/board' }
 ]

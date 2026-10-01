@@ -33,13 +33,16 @@ public class SectionService {
     private final SectionRepository sectionRepository;
     private final LineRepository lineRepository;
     private final ViewSupport viewSupport;
+    private final HandoverService handoverService;
 
     public SectionService(SectionRepository sectionRepository,
                           LineRepository lineRepository,
-                          ViewSupport viewSupport) {
+                          ViewSupport viewSupport,
+                          HandoverService handoverService) {
         this.sectionRepository = sectionRepository;
         this.lineRepository = lineRepository;
         this.viewSupport = viewSupport;
+        this.handoverService = handoverService;
     }
 
     @Transactional(readOnly = true)
@@ -119,6 +122,9 @@ public class SectionService {
             section.setSpeedLimit(section.getDesignSpeed());
         }
         section.setStatus(status);
-        return viewSupport.toView(sectionRepository.save(section));
+        Section saved = sectionRepository.save(section);
+        // 区段状态/限速在复核完成前被手工调整：在途交接申请即时失效，旧结论不得套用
+        handoverService.invalidateStaleApplications();
+        return viewSupport.toView(saved);
     }
 }

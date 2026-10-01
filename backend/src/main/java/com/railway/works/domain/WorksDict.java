@@ -111,6 +111,34 @@ public final class WorksDict {
     /** 天窗点单次最长时长（分钟），超过需分段提报 */
     public static final int MAX_WINDOW_MINUTES = 300;
 
+    // ---------------- 封锁解除交接 ----------------
+    /** 交接申请四态 + SUPERSEDED（已退回/失效单被重提后进入的历史态，不再占"进行中"名额） */
+    private static final Map<String, String> HANDOVER_STATUS = Map.of(
+            "PENDING", "待复核",
+            "APPROVED", "已通过",
+            "REJECTED", "已退回",
+            "EXPIRED", "已失效",
+            "SUPERSEDED", "已重提");
+
+    /** 现场四项填报结果 / 复核逐项确认 */
+    private static final Map<String, String> CHECK_RESULT = Map.of(
+            "OK", "合格",
+            "NG", "不合格");
+
+    private static final Map<String, String> REVIEW_CHECK = Map.of(
+            "CONFIRM", "确认合格",
+            "RETURN", "退回整改");
+
+    /** 轨迹动作 */
+    private static final Map<String, String> HANDOVER_ACTION = Map.of(
+            "SUBMIT", "提交申请",
+            "RESUBMIT", "整改重提",
+            "RETURN", "复核退回",
+            "APPROVE", "复核通过",
+            "EXPIRE", "系统失效");
+
+    /** 解除建议/最终结论 与区段状态共用一套码：NORMAL / SPEED_LIMIT / BLOCKED */
+
     // ---------------- 物资机具 ----------------
     private static final Map<String, String> EQUIP_STATUS = Map.of(
             "AVAILABLE", "可用",
@@ -226,6 +254,34 @@ public final class WorksDict {
             return null;
         }
         return WORK_STATUS_ORDER.get(index + 1);
+    }
+
+    public static boolean isValidHandoverStatus(String code) {
+        return code != null && HANDOVER_STATUS.containsKey(code);
+    }
+
+    public static String handoverStatusName(String code) {
+        return nameOf(HANDOVER_STATUS, code);
+    }
+
+    public static boolean isValidCheckResult(String code) {
+        return code != null && CHECK_RESULT.containsKey(code);
+    }
+
+    public static String checkResultName(String code) {
+        return nameOf(CHECK_RESULT, code);
+    }
+
+    public static boolean isValidReviewCheck(String code) {
+        return code != null && REVIEW_CHECK.containsKey(code);
+    }
+
+    public static String reviewCheckName(String code) {
+        return nameOf(REVIEW_CHECK, code);
+    }
+
+    public static String handoverActionName(String code) {
+        return nameOf(HANDOVER_ACTION, code);
     }
 
     public static boolean isValidEquipStatus(String code) {

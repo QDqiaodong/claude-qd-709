@@ -19,8 +19,13 @@
 --   [F3] 重级病害 7 天整治时限，逾期整行标红 → id=2（HEAVY，发现 2026-09-02）
 --   [W1] 单次天窗不超过 300 分钟 → service 校验
 --   [W2] 同区段同天窗日不可重复排程 → WO-2026-0001 占 GX-01 的 2026-09-26
---   [W3] 状态只能逐级推进       → 计划 → 已批复 → 施工中 → 已验收 → 已销号
---   [W4] 已销号作业单不可再推进 → WO-2026-0006 = CLOSED
+--   [W3] 状态只能逐级推进       → 计划 → 已批复 → 施工中 → 已验收（已验收后必须走封锁解除交接台）
+--   [W4] 已销号作业单不可再推进 → WO-2026-0006 = CLOSED（系统升级前的历史销号，无交接记录照常展示）
+--   [H1] 已验收作业只能经"封锁解除交接台"销号，不允许直接 advance 到 CLOSED
+--   [H2] 交接申请四态：PENDING 待复核 / APPROVED 已通过 / REJECTED 已退回 / EXPIRED 已失效
+--   [H3] 申请固化作业状态、区段状态、未销号重级病害快照；快照外任一变化即把待复核申请置失效
+--   [H4] 复核人不得与施工负责人同一人；区段仍有未销号重级病害时结论不能是恢复正常
+--   [H5] 通过时同一事务关闭作业单并更新区段，任一失败整体回滚，不留半成品
 --   [M1] 库存低于安全库存预警   → 弹条扣件 / 液压起拨道机 等
 --   [M2] 出库数量不得大于库存   → service 校验
 --   [M3] 报废机具不再排检修     → EQ-0009 = SCRAP
@@ -32,6 +37,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 CREATE DATABASE IF NOT EXISTS railway_works DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE railway_works;
 
+DROP TABLE IF EXISTS handover_timeline;
+DROP TABLE IF EXISTS handover;
 DROP TABLE IF EXISTS equipment;
 DROP TABLE IF EXISTS material;
 DROP TABLE IF EXISTS work_order;
@@ -210,6 +217,72 @@ CREATE TABLE work_order (
     PRIMARY KEY (id),
     UNIQUE KEY uk_order_no (order_no),
     KEY idx_order_section (section_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 模块四-延伸：封锁解除交接台 ----------------
+-- 一张作业单同时只允许存在一份"进行中"（待复核/已退回）的交接申请；
+-- 已通过/已失效的旧单保留，重提生成新单并以 reapply_of_id 串起整条链路。
+CREATE TABLE handover (
+    id                      BIGINT      NOT NULL AUTO_INCREMENT,
+    handover_no             VARCHAR(32) NOT NULL COMMENT '交接申请编号',
+    work_order_id           BIGINT      NOT NULL COMMENT '养修作业单（必须已验收）',
+    section_id              BIGINT      NOT NULL COMMENT '对应区段（提交时冗余固化）',
+    applicant               VARCHAR(32) NOT NULL COMMENT '发起人（施工负责人）',
+    reviewer                VARCHAR(32) COMMENT '复核人（必须与发起人不同）',
+    status                  VARCHAR(16) NOT NULL COMMENT 'PENDING 待复核 / APPROVED 已通过 / REJECTED 已退回 / EXPIRED 已失效 / SUPERSEDED 已被重提（历史态）',
+    active_key              BIGINT      GENERATED ALWAYS AS (CASE WHEN status IN ('PENDING','REJECTED') THEN work_order_id ELSE NULL END) VIRTUAL COMMENT '进行中申请的唯一约束键（SUPERSEDED 释放占用）',
+    version                 BIGINT      NOT NULL DEFAULT 0 COMMENT '乐观锁：并发复核只允许一份结论生效',
+    -- 现场四项逐项填报：结果 OK 通过 / NG 不达标
+    clearance_result        VARCHAR(8)  NOT NULL COMMENT '现场清障结果',
+    evacuation_result       VARCHAR(8)  NOT NULL COMMENT '人员撤离结果',
+    equipment_result        VARCHAR(8)  NOT NULL COMMENT '机具撤出结果',
+    retest_result           VARCHAR(8)  NOT NULL COMMENT '线路复测结果',
+    clearance_remark        VARCHAR(255),
+    evacuation_remark       VARCHAR(255),
+    equipment_remark        VARCHAR(255),
+    retest_remark           VARCHAR(255),
+    apply_note              VARCHAR(255) COMMENT '发起/重提说明',
+    recommendation          VARCHAR(16) NOT NULL COMMENT '建议 NORMAL 恢复正常 / SPEED_LIMIT 继续限速 / BLOCKED 继续封锁',
+    speed_limit             INT         COMMENT '建议限速时的限速值（不得高于设计时速）',
+    limit_reason            VARCHAR(255) COMMENT '限速原因',
+    -- 复核结论：四项逐项确认 CONFIRM / 退回整改 RETURN
+    clearance_check         VARCHAR(8),
+    evacuation_check        VARCHAR(8),
+    equipment_check         VARCHAR(8),
+    retest_check            VARCHAR(8),
+    conclusion              VARCHAR(16) COMMENT '最终结论 NORMAL/SPEED_LIMIT/BLOCKED',
+    conclusion_speed_limit  INT         COMMENT '最终限速值',
+    conclusion_limit_reason VARCHAR(255),
+    review_note             VARCHAR(255) COMMENT '复核/退回说明',
+    reviewed_at             DATETIME    COMMENT '复核时间',
+    -- 提交时刻固化的快照（JSON 字符串），用于失效比对与页面"变化项"展示
+    snap_work_status        VARCHAR(16) NOT NULL COMMENT '快照：作业单状态',
+    snap_section_status     VARCHAR(16) NOT NULL COMMENT '快照：区段状态',
+    snap_section_speed      INT         COMMENT '快照：区段限速值',
+    snap_heavy_defect_ids   VARCHAR(255) NOT NULL COMMENT '快照：未销号重级病害 id 清单，逗号分隔',
+    expired_reason          VARCHAR(255) COMMENT '失效原因（含变化项摘要）',
+    reapply_of_id           BIGINT      COMMENT '重提自哪张旧申请',
+    submitted_at            DATETIME    NOT NULL COMMENT '本次提交/重提时间',
+    created_at              DATETIME    NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_handover_no (handover_no),
+    KEY idx_handover_order (work_order_id),
+    KEY idx_handover_section (section_id),
+    KEY idx_handover_status (status),
+    UNIQUE KEY uk_handover_active (active_key),
+    KEY idx_handover_reapply (reapply_of_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 完整处理轨迹：提交 / 退回 / 重提 / 复核结论 / 系统失效 每次操作一行
+CREATE TABLE handover_timeline (
+    id           BIGINT      NOT NULL AUTO_INCREMENT,
+    handover_id  BIGINT      NOT NULL,
+    action       VARCHAR(16) NOT NULL COMMENT 'SUBMIT 提交/RESUBMIT 重提/RETURN 退回/APPROVE 通过/EXPIRE 失效',
+    actor        VARCHAR(32) COMMENT '操作人（EXPIRE 为系统）',
+    note         VARCHAR(255) COMMENT '说明',
+    created_at   DATETIME    NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_timeline_handover (handover_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------- 模块五：物资与机具 ----------------

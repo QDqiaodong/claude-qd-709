@@ -37,15 +37,18 @@ public class DefectService {
     private final InspectionRepository inspectionRepository;
     private final SectionRepository sectionRepository;
     private final ViewSupport viewSupport;
+    private final HandoverService handoverService;
 
     public DefectService(DefectRepository defectRepository,
                          InspectionRepository inspectionRepository,
                          SectionRepository sectionRepository,
-                         ViewSupport viewSupport) {
+                         ViewSupport viewSupport,
+                         HandoverService handoverService) {
         this.defectRepository = defectRepository;
         this.inspectionRepository = inspectionRepository;
         this.sectionRepository = sectionRepository;
         this.viewSupport = viewSupport;
+        this.handoverService = handoverService;
     }
 
     /** 病害清单：可按区段、严重等级、是否销号筛选 */
@@ -108,7 +111,10 @@ public class DefectService {
         defect.setDescription(req.getDescription().trim());
         defect.setFoundDate(foundDate);
         defect.setClosed(false);
-        return viewSupport.toView(defectRepository.save(defect));
+        Defect saved = defectRepository.save(defect);
+        // 新登记（重级）病害改变了区段未销号重级病害清单：在途交接申请即时失效
+        handoverService.invalidateStaleApplications();
+        return viewSupport.toView(saved);
     }
 
     /** 病害销号 */
@@ -130,6 +136,9 @@ public class DefectService {
         defect.setClosed(true);
         defect.setCloseDate(closeDate);
         defect.setTreatment(treatment);
-        return viewSupport.toView(defectRepository.save(defect));
+        Defect saved = defectRepository.save(defect);
+        // 病害销号（尤其重级）改变了快照清单：在途交接申请即时失效
+        handoverService.invalidateStaleApplications();
+        return viewSupport.toView(saved);
     }
 }

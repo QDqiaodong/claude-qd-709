@@ -2,6 +2,7 @@ package com.railway.works.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 
@@ -165,6 +166,117 @@ public final class Views {
         private String status;
         private String statusName;
         private String nextStatusName;
+        /** 已验收后不能再直接销号，必须走封锁解除交接台 */
+        private Boolean handoverRequired;
+        /** 该作业当前进行中（待复核/已退回）的交接申请 id，用于页面直达 */
+        private Long activeHandoverId;
+        private String activeHandoverStatus;
+        private String activeHandoverStatusName;
+    }
+
+    /** 交接列表行 / 申请详情共用视图；详情字段在列表场景留空 */
+    @Data
+    public static class HandoverView {
+        private Long id;
+        private String handoverNo;
+        private Long workOrderId;
+        private String orderNo;
+        private String workItemName;
+        private Long sectionId;
+        private String sectionNo;
+        private Long lineId;
+        private String lineName;
+        private Integer designSpeed;
+        private String applicant;
+        private String reviewer;
+        private String status;
+        private String statusName;
+        private Long version;
+        private LocalDateTime submittedAt;
+        private LocalDateTime reviewedAt;
+        private String recommendation;
+        private String recommendationName;
+        private Integer speedLimit;
+        private String limitReason;
+        private String conclusion;
+        private String conclusionName;
+        private Integer conclusionSpeedLimit;
+        private String conclusionLimitReason;
+        private String reviewNote;
+        private String applyNote;
+        private String expiredReason;
+        private Long reapplyOfId;
+
+        // ---- 现场四项填报 ----
+        private String clearanceResult;
+        private String clearanceResultName;
+        private String evacuationResult;
+        private String evacuationResultName;
+        private String equipmentResult;
+        private String equipmentResultName;
+        private String retestResult;
+        private String retestResultName;
+        private String clearanceRemark;
+        private String evacuationRemark;
+        private String equipmentRemark;
+        private String retestRemark;
+
+        // ---- 复核四项确认 ----
+        private String clearanceCheck;
+        private String clearanceCheckName;
+        private String evacuationCheck;
+        private String evacuationCheckName;
+        private String equipmentCheck;
+        private String equipmentCheckName;
+        private String retestCheck;
+        private String retestCheckName;
+
+        // ---- 提交时固化的快照 ----
+        private String snapWorkStatus;
+        private String snapWorkStatusName;
+        private String snapSectionStatus;
+        private String snapSectionStatusName;
+        private Integer snapSectionSpeed;
+        private List<DefectView> snapHeavyDefects;
+
+        // ---- 当前最新现场（与快照逐项比对） ----
+        private String currentWorkStatus;
+        private String currentWorkStatusName;
+        private String currentSectionStatus;
+        private String currentSectionStatusName;
+        private Integer currentSectionSpeed;
+        private List<DefectView> currentHeavyDefects;
+
+        /** 复核失效的变化项（作业状态/区段状态/重级病害销号或新增） */
+        private List<HandoverChangeView> changes;
+
+        /** 完整处理轨迹 */
+        private List<HandoverTimelineView> timeline;
+
+        /** 重提链路：同一条链上的历史申请（仅详情返回） */
+        private List<HandoverView> chain;
+    }
+
+    /** 快照 vs 最新现场的单个变化项 */
+    @Data
+    public static class HandoverChangeView {
+        /** WORK_STATUS 作业状态 / SECTION_STATUS 区段状态 / DEFECT 病害销号变化 */
+        private String type;
+        private String typeName;
+        private String before;
+        private String after;
+        private String detail;
+    }
+
+    /** 交接处理轨迹行 */
+    @Data
+    public static class HandoverTimelineView {
+        private Long id;
+        private String action;
+        private String actionName;
+        private String actor;
+        private String note;
+        private LocalDateTime createdAt;
     }
 
     /** 物资 */

@@ -35,7 +35,7 @@
     <section class="panel">
       <div class="panel-head">
         <h3>养修作业单</h3>
-        <span class="panel-sub">计划 → 已批复 → 施工中 → 已验收 → 已销号，逐级推进</span>
+        <span class="panel-sub">计划 → 已批复 → 施工中 → 已验收；已验收后须到「封锁解除交接台」复核销号</span>
         <div class="panel-extra">
           <el-button size="small" @click="load">刷新</el-button>
           <el-button size="small" type="primary" @click="openCreate">新增作业单</el-button>
@@ -59,9 +59,15 @@
             <el-tag size="small" :type="tagType(row.status)">{{ row.statusName }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.status !== 'CLOSED'" link type="primary" @click="advance(row)">
+            <template v-if="row.status === 'CHECKED'">
+              <el-button link type="warning" size="small" @click="goHandover(row)">
+                {{ row.activeHandoverId ? '交接申请：' + row.activeHandoverStatusName : '发起封锁解除交接' }}
+              </el-button>
+              <span class="muted" style="font-size: 12px">已验收不可直接销号</span>
+            </template>
+            <el-button v-else-if="row.status !== 'CLOSED'" link type="primary" @click="advance(row)">
               推进至{{ row.nextStatusName }}
             </el-button>
             <span v-else class="muted">已终结</span>
@@ -106,10 +112,12 @@
 
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { workOrderApi } from '../api'
 
 const works = inject('works')
+const router = useRouter()
 const list = ref([])
 const createVisible = ref(false)
 const form = ref({
@@ -216,6 +224,15 @@ async function advance(row) {
   await workOrderApi.advance(row.id)
   ElMessage.success(`已推进至${row.nextStatusName}`)
   await Promise.all([load(), works.reloadBoard(), works.reloadOverview()])
+}
+
+/** 已验收 → 交接台；有在途申请时直达该申请详情，否则带作业单过去直接发起 */
+function goHandover(row) {
+  if (row.activeHandoverId) {
+    router.push({ path: '/handovers', query: { handoverId: row.activeHandoverId } })
+  } else {
+    router.push({ path: '/handovers', query: { orderId: row.id } })
+  }
 }
 
 watch(() => works.sectionId.value, load)

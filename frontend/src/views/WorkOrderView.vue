@@ -35,7 +35,7 @@
     <section class="panel">
       <div class="panel-head">
         <h3>养修作业单</h3>
-        <span class="panel-sub">计划 → 已批复 → 施工中 → 已验收 → 已销号，逐级推进</span>
+        <span class="panel-sub">计划 → 已批复 → 施工中 → 已验收；「已验收 → 已销号」必须经封锁解除交接台复核通过</span>
         <div class="panel-extra">
           <el-button size="small" @click="load">刷新</el-button>
           <el-button size="small" type="primary" @click="openCreate">新增作业单</el-button>
@@ -59,12 +59,15 @@
             <el-tag size="small" :type="tagType(row.status)">{{ row.statusName }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.status !== 'CLOSED'" link type="primary" @click="advance(row)">
-              推进至{{ row.nextStatusName }}
+            <template v-if="row.status === 'PLAN' || row.status === 'APPROVED' || row.status === 'WORKING'">
+              <el-button link type="primary" @click="advance(row)">推进至{{ row.nextStatusName }}</el-button>
+            </template>
+            <el-button v-else-if="row.status === 'CHECKED'" link type="warning" @click="goRelease(row)">
+              封锁解除交接
             </el-button>
-            <span v-else class="muted">已终结</span>
+            <span v-else-if="row.status === 'CLOSED'" class="muted">已销号（终结）</span>
           </template>
         </el-table-column>
       </el-table>
@@ -106,10 +109,12 @@
 
 <script setup>
 import { computed, inject, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { workOrderApi } from '../api'
 
 const works = inject('works')
+const nav = useRouter()
 const list = ref([])
 const createVisible = ref(false)
 const form = ref({
@@ -216,6 +221,11 @@ async function advance(row) {
   await workOrderApi.advance(row.id)
   ElMessage.success(`已推进至${row.nextStatusName}`)
   await Promise.all([load(), works.reloadBoard(), works.reloadOverview()])
+}
+
+/** 已验收作业不能直接销号，跳封锁解除交接台并预选该作业单 */
+function goRelease(row) {
+  nav.push({ path: '/releases', query: { orderId: row.id } })
 }
 
 watch(() => works.sectionId.value, load)

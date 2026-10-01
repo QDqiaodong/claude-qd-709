@@ -68,6 +68,15 @@ export const workOrderApi = {
   advance: (id) => http.post(`/work-orders/${id}/advance`)
 }
 
+/** 模块四扩展：封锁解除交接台 */
+export const blockReleaseApi = {
+  list: (params) => http.get('/block-releases', { params: params || {} }),
+  detail: (id) => http.get(`/block-releases/${id}`),
+  submit: (data) => http.post('/block-releases', data),
+  resubmit: (id, data) => http.post(`/block-releases/${id}/resubmit`, data),
+  review: (id, data) => http.post(`/block-releases/${id}/review`, data)
+}
+
 /** 模块五：物资与机具 */
 export const materialApi = {
   list: () => http.get('/materials'),

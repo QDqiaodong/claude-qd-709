@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:railway;MODE=MySQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create
+    open-in-view: false
+  sql:
+    init:
+      mode: never

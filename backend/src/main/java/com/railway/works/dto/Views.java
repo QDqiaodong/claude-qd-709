@@ -2,6 +2,7 @@ package com.railway.works.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 
@@ -195,10 +196,95 @@ public final class Views {
         private String statusName;
     }
 
+    /** 封锁解除交接单 */
+    @Data
+    public static class BlockReleaseView {
+        private Long id;
+        private String releaseNo;
+        private Long workOrderId;
+        private String orderNo;
+        private String workItem;
+        private String workItemName;
+        private Long sectionId;
+        private String sectionNo;
+        private Long lineId;
+        private String lineName;
+
+        // 现场四项
+        private String siteClear;
+        private String staffWithdrawn;
+        private String equipmentRemoved;
+        private String retestResult;
+
+        // 施工负责人建议
+        private String suggestion;
+        private String suggestionName;
+        private Integer suggestedSpeed;
+        private String limitReason;
+
+        private String leader;
+        private String reviewer;
+        private String status;
+        private String statusName;
+
+        // 发起时快照
+        private String snapshotWorkStatus;
+        private String snapshotWorkStatusName;
+        private String snapshotSectionStatus;
+        private String snapshotSectionStatusName;
+        private Integer snapshotSectionSpeed;
+        private List<Long> snapshotHeavyDefectIds;
+        private String snapshotHeavyDefectText;
+
+        // 复核结论
+        private String finalDecision;
+        private String finalDecisionName;
+        private Integer finalSpeed;
+        private String finalReason;
+
+        private LocalDateTime submittedAt;
+        private LocalDateTime reviewedAt;
+        private LocalDateTime invalidatedAt;
+        private String invalidReason;
+        private Long version;
+
+        /** 发起时作业 / 区段 / 重级病害与当前现场的逐项差异（空表示现场未变化） */
+        private List<ReleaseChangeView> changes;
+        /** 当前现场是否仍存在未销号重级病害（控制页面上能不能给“恢复正常”） */
+        private Boolean currentHeavyOpen;
+        private Integer currentDesignSpeed;
+
+        private List<ReleaseLogView> logs;
+    }
+
+    /** 交接单失效变化项：作业状态 / 区段状态 / 重级病害销号情况 */
+    @Data
+    public static class ReleaseChangeView {
+        /** WORK_STATUS / SECTION_STATUS / HEAVY_DEFECT */
+        private String changeType;
+        private String changeTypeName;
+        private String snapshotText;
+        private String currentText;
+        /** 是否确实发生了变化（false 表示这一项与发起时一致） */
+        private Boolean changed;
+    }
+
+    /** 交接处理轨迹一条 */
+    @Data
+    public static class ReleaseLogView {
+        private Long id;
+        private String action;
+        private String actionName;
+        private String operator;
+        private LocalDateTime actedAt;
+        private String remark;
+        private String resultStatus;
+        private String resultStatusName;
+    }
+
     /** 顶部计数器 */
     @Data
-    public static class Overview {
-        private Integer lineCount;
+    public static class Overview {        private Integer lineCount;
         private Integer sectionCount;
         private Integer deviceCount;
         private Integer defectOpen;

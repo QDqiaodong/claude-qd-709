@@ -26,7 +26,9 @@ import com.railway.works.repository.WorkOrderRepository;
  *   <li>作业单号唯一</li>
  *   <li>天窗点结束时刻必须晚于开始时刻，且单次不超过 {@value WorksDict#MAX_WINDOW_MINUTES} 分钟</li>
  *   <li>同一区段同一天窗日期不允许重复排程</li>
- *   <li>状态只能逐级推进：计划 → 已批复 → 施工中 → 已验收 → 已销号，已销号不可再动</li>
+ *   <li>状态只能逐级推进：计划 → 已批复 → 施工中 → 已验收；
+ *       <b>「已验收 → 已销号」必须走封锁解除交接台</b>，不允许再由此直接推进。
+ *       系统升级前已经销号的历史作业单原样展示，不要求补造交接申请。</li>
  *   <li>区段处于封锁施工时不允许再排新的施工天窗</li>
  * </ol>
  */
@@ -36,13 +38,16 @@ public class WorkOrderService {
     private final WorkOrderRepository workOrderRepository;
     private final SectionRepository sectionRepository;
     private final ViewSupport viewSupport;
+    private final BlockReleaseService blockReleaseService;
 
     public WorkOrderService(WorkOrderRepository workOrderRepository,
                             SectionRepository sectionRepository,
-                            ViewSupport viewSupport) {
+                            ViewSupport viewSupport,
+                            BlockReleaseService blockReleaseService) {
         this.workOrderRepository = workOrderRepository;
         this.sectionRepository = sectionRepository;
         this.viewSupport = viewSupport;
+        this.blockReleaseService = blockReleaseService;
     }
 
     @Transactional(readOnly = true)
@@ -104,14 +109,20 @@ public class WorkOrderService {
         return viewSupport.toView(workOrderRepository.save(order));
     }
 
-    /** 状态推进：计划 → 已批复 → 施工中 → 已验收 → 已销号 */
+    /** 状态推进：计划 → 已批复 → 施工中 → 已验收；已验收之后由封锁解除交接台关闭 */
     @Transactional
     public Views.WorkOrderView advance(Long id) {
         WorkOrder order = workOrderRepository.findById(id)
                 .orElseThrow(() -> new BizException("作业单不存在：id=" + id));
+        if ("CLOSED".equals(order.getStatus())) {
+            throw new BizException("作业单 " + order.getOrderNo() + " 已销号，不能再推进");
+        }
+        if ("CHECKED".equals(order.getStatus())) {
+            throw new BizException("「已验收 → 已销号」必须发起封锁解除交接、经复核通过后关闭，不能直接推进");
+        }
         String next = WorksDict.nextWorkStatus(order.getStatus());
         if (next == null) {
-            throw new BizException("作业单 " + order.getOrderNo() + " 已销号，不能再推进");
+            throw new BizException("作业单 " + order.getOrderNo() + " 已到终态，不能再推进");
         }
         if ("WORKING".equals(next)) {
             Section section = sectionRepository.findById(order.getSectionId()).orElse(null);
@@ -134,14 +145,10 @@ public class WorkOrderService {
                 section.setSpeedLimit(Math.min(WorksDict.DEFAULT_SPEED_LIMIT, section.getDesignSpeed()));
                 sectionRepository.save(section);
             }
-        } else if ("CLOSED".equals(next)) {
-            Section section = sectionRepository.findById(order.getSectionId()).orElse(null);
-            if (section != null && !"NORMAL".equals(section.getStatus())) {
-                section.setStatus("NORMAL");
-                section.setSpeedLimit(section.getDesignSpeed());
-                sectionRepository.save(section);
-            }
         }
-        return viewSupport.toView(workOrderRepository.save(order));
+        WorkOrder saved = workOrderRepository.save(order);
+        // 作业状态 / 区段状态变了：引用该作业或该区段的待办交接申请一律失效
+        blockReleaseService.invalidateStaleFor(saved.getId(), saved.getSectionId());
+        return viewSupport.toView(saved);
     }
 }

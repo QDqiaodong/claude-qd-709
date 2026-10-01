@@ -19,8 +19,14 @@
 --   [F3] 重级病害 7 天整治时限，逾期整行标红 → id=2（HEAVY，发现 2026-09-02）
 --   [W1] 单次天窗不超过 300 分钟 → service 校验
 --   [W2] 同区段同天窗日不可重复排程 → WO-2026-0001 占 GX-01 的 2026-09-26
---   [W3] 状态只能逐级推进       → 计划 → 已批复 → 施工中 → 已验收 → 已销号
---   [W4] 已销号作业单不可再推进 → WO-2026-0006 = CLOSED
+--   [W3] 状态只能逐级推进       → 计划 → 已批复 → 施工中 → 已验收；
+--                                「已验收 → 已销号」必须走封锁解除交接台（block_release）
+--   [W4] 已销号作业单不可再推进 → WO-2026-0006 = CLOSED（升级前历史销号，不补造交接单）
+--   [R1] 交接单四态             → 待复核 PENDING / 已通过 APPROVED / 已退回 REJECTED / 已失效 INVALID
+--   [R2] 有未销号重级病害不能恢复正常，只能继续限速（限速值≤设计时速且填原因）或继续封锁
+--   [R3] 发起即固化作业状态/区段状态/重级病害清单快照，任一项变化 → 旧单 INVALID
+--   [R4] version 乐观锁         → 并发复核只有一份结论、一次销号与区段更新
+--   [R5] 交接通过同事务原子完成  → 作业 CLOSED + 区段按结论 NORMAL/SPEED_LIMIT/BLOCKED
 --   [M1] 库存低于安全库存预警   → 弹条扣件 / 液压起拨道机 等
 --   [M2] 出库数量不得大于库存   → service 校验
 --   [M3] 报废机具不再排检修     → EQ-0009 = SCRAP
@@ -32,6 +38,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 CREATE DATABASE IF NOT EXISTS railway_works DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE railway_works;
 
+DROP TABLE IF EXISTS block_release_log;
+DROP TABLE IF EXISTS block_release;
 DROP TABLE IF EXISTS equipment;
 DROP TABLE IF EXISTS material;
 DROP TABLE IF EXISTS work_order;
@@ -212,6 +220,57 @@ CREATE TABLE work_order (
     KEY idx_order_section (section_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------- 模块四（扩展）：封锁解除交接台 ----------------
+-- 已验收作业不能直接销号，必须由施工负责人发起本交接单、另一名复核人给出唯一结论；
+-- version 乐观锁保证并发复核只有一份结论生效。
+CREATE TABLE block_release (
+    id                          BIGINT       NOT NULL AUTO_INCREMENT,
+    release_no                  VARCHAR(32)  NOT NULL COMMENT '交接单号',
+    work_order_id               BIGINT       NOT NULL COMMENT '对应的养修作业单',
+    section_id                  BIGINT       NOT NULL COMMENT '对应区段',
+    site_clear                  VARCHAR(255) NOT NULL COMMENT '现场清障结果',
+    staff_withdrawn             VARCHAR(255) NOT NULL COMMENT '人员撤离结果',
+    equipment_removed           VARCHAR(255) NOT NULL COMMENT '机具撤出结果',
+    retest_result               VARCHAR(255) NOT NULL COMMENT '线路复测结果',
+    suggestion                  VARCHAR(16)  NOT NULL COMMENT 'NORMAL 恢复正常/SPEED_LIMIT 继续限速/BLOCKED 继续封锁',
+    suggested_speed             INT          COMMENT '建议限速值',
+    limit_reason                VARCHAR(255) COMMENT '限速原因',
+    leader                      VARCHAR(32)  NOT NULL COMMENT '施工负责人（发起人）',
+    reviewer                    VARCHAR(32)  COMMENT '复核人（不得与负责人相同）',
+    status                      VARCHAR(16)  NOT NULL COMMENT 'PENDING 待复核/APPROVED 已通过/REJECTED 已退回/INVALID 已失效',
+    snapshot_work_status        VARCHAR(16)  NOT NULL COMMENT '发起时作业单状态快照',
+    snapshot_section_status     VARCHAR(16)  NOT NULL COMMENT '发起时区段状态快照',
+    snapshot_section_speed      INT          COMMENT '发起时区段限速值快照',
+    snapshot_heavy_defect_ids   VARCHAR(1000) NOT NULL COMMENT '发起时未销号重级病害id清单，逗号分隔',
+    snapshot_heavy_defect_text  VARCHAR(2000) NOT NULL COMMENT '发起时未销号重级病害摘要',
+    final_decision              VARCHAR(16)  COMMENT '复核最终结论 NORMAL/SPEED_LIMIT/BLOCKED',
+    final_speed                 INT          COMMENT '最终限速值',
+    final_reason                VARCHAR(255) COMMENT '复核意见/限速原因',
+    submitted_at                DATETIME     NOT NULL COMMENT '提交（含重提）时间',
+    reviewed_at                 DATETIME     COMMENT '复核时间',
+    invalidated_at              DATETIME     COMMENT '失效时间',
+    invalid_reason              VARCHAR(500) COMMENT '失效变化项说明',
+    version                     BIGINT       NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_release_no (release_no),
+    KEY idx_release_work (work_order_id),
+    KEY idx_release_section (section_id),
+    KEY idx_release_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 交接处理轨迹：每次提交/重提/退回/通过/失效各一条，保留时间、人员、说明
+CREATE TABLE block_release_log (
+    id            BIGINT       NOT NULL AUTO_INCREMENT,
+    release_id    BIGINT       NOT NULL,
+    action        VARCHAR(16)  NOT NULL COMMENT 'SUBMIT/RESUBMIT/REJECT/APPROVE/INVALIDATE',
+    operator      VARCHAR(32)  NOT NULL COMMENT '操作人（失效为系统）',
+    acted_at      DATETIME     NOT NULL,
+    remark        VARCHAR(1000) COMMENT '说明/意见/失效变化项',
+    result_status VARCHAR(16)  NOT NULL COMMENT '动作后申请状态',
+    PRIMARY KEY (id),
+    KEY idx_release_log (release_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ---------------- 模块五：物资与机具 ----------------
 CREATE TABLE material (
     id           BIGINT      NOT NULL AUTO_INCREMENT,
@@ -373,7 +432,54 @@ INSERT INTO work_order (id, order_no, section_id, work_item, window_date, start_
 (9,  'WO-2026-0009', 6, 'TAMP',           '2026-09-22', '00:30:00', '03:30:00', '郑高原', 26, NULL, 'CHECKED'),
 (10, 'WO-2026-0010', 7, 'GRIND',          '2026-10-02', '00:20:00', '03:20:00', '冯志强', 22, '广州电务段', 'PLAN'),
 (11, 'WO-2026-0011', 10, 'SCREEN',        '2026-10-04', '01:00:00', '04:30:00', '陈沪生', 48, '上海工务段', 'PLAN'),
-(12, 'WO-2026-0012', 14, 'TAMP',          '2026-10-06', '00:30:00', '03:00:00', '刘京沪', 30, '济南工务段', 'PLAN');
+(12, 'WO-2026-0012', 14, 'TAMP',          '2026-10-06', '00:30:00', '03:00:00', '刘京沪', 30, '济南工务段', 'PLAN'),
+(13, 'WO-2026-0013', 6, 'ALIGN',          '2026-09-19', '00:30:00', '03:00:00', '郑高原', 20, NULL, 'CLOSED'),
+(14, 'WO-2026-0014', 2, 'LIFT',           '2026-09-23', '00:15:00', '04:45:00', '赵铁军', 42, '北京工务机械段', 'CHECKED');
+
+-- 封锁解除交接演示数据：待复核 / 已退回 / 已失效 / 已通过 四种状态各一
+INSERT INTO block_release (id, release_no, work_order_id, section_id,
+    site_clear, staff_withdrawn, equipment_removed, retest_result,
+    suggestion, suggested_speed, limit_reason, leader, reviewer, status,
+    snapshot_work_status, snapshot_section_status, snapshot_section_speed,
+    snapshot_heavy_defect_ids, snapshot_heavy_defect_text,
+    final_decision, final_speed, final_reason, submitted_at, reviewed_at, invalidated_at, invalid_reason, version)
+VALUES
+(1, 'BR-2026-0001', 9, 6,
+ '限界内路料、旧枕全部清运完毕，栅栏恢复', '作业人员 26 人已全部撤至安全区，点名确认', '捣固机、起拨道机 3 台已撤出并回库登记', '轨道检查仪复测高低 3mm、轨向 2mm，符合验收标准',
+ 'SPEED_LIMIT', 80, '桥梁养护常规限速 80km/h，待观察一周后恢复', '郑高原', NULL, 'PENDING',
+ 'CHECKED', 'SPEED_LIMIT', 80,
+ '', '无未销号重级病害',
+ NULL, NULL, NULL, '2026-09-22 03:35:00', NULL, NULL, NULL, 0),
+(2, 'BR-2026-0002', 7, 2,
+ '道床清筛弃砟已清运，排水畅通', '应力放散人员 38 人全部撤离', '拉伸器、撞轨器全部撤出', '锁定轨温复测 24.5℃，位移观测桩无异常',
+ 'SPEED_LIMIT', 45, '路基沉降与几何超限两处重级病害未销号，只能继续限速', '李长顺', '赵铁军', 'REJECTED',
+ 'CHECKED', 'SPEED_LIMIT', 45,
+ '2,5', 'K19+200 路基沉降导致高低超限 22mm，需限速；K22+600 轨距+11mm 三角坑超限',
+ NULL, NULL, NULL, '2026-09-23 02:10:00', '2026-09-23 09:20:00', NULL, NULL, 1),
+(3, 'BR-2026-0003', 14, 2,
+ '清筛弃砟已清运', '人员已撤离', '机具已撤出', '复测几何尺寸达标',
+ 'SPEED_LIMIT', 45, '两处重级病害未销号，继续限速观测', '赵铁军', '李长顺', 'INVALID',
+ 'CHECKED', 'SPEED_LIMIT', 60,
+ '2', 'K19+200 路基沉降导致高低超限 22mm，需限速',
+ NULL, NULL, NULL, '2026-09-23 05:30:00', NULL, '2026-09-24 12:00:00',
+ '未销号重级病害：K19+200 路基沉降导致高低超限 22mm，需限速 → 无未销号重级病害（已销号/消失：K19+200 路基沉降导致高低超限 22mm，需限速；新发现/升级：K22+600 轨距+11mm 三角坑超限）', 2),
+(4, 'BR-2026-0004', 13, 6,
+ '拨道后线路两侧无侵限物，标志标桩齐全', '作业人员 20 人全部撤离并点名', '起拨道机、轨道检查仪全部撤出', '复测方向 2mm、水平差 1mm，满足常速放行条件',
+ 'NORMAL', NULL, NULL, '郑高原', '王建国', 'APPROVED',
+ 'CHECKED', 'SPEED_LIMIT', 80,
+ '', '无未销号重级病害',
+ 'NORMAL', NULL, '四项现场确认齐全，无未销号重级病害，同意恢复正常', '2026-09-19 03:15:00', '2026-09-19 08:40:00', NULL, NULL, 1);
+
+INSERT INTO block_release_log (id, release_id, action, operator, acted_at, remark, result_status) VALUES
+(1, 1, 'SUBMIT', '郑高原', '2026-09-22 03:35:00', '发起封锁解除申请，建议：继续限速 80km/h', 'PENDING'),
+(2, 2, 'SUBMIT', '李长顺', '2026-09-22 05:05:00', '发起封锁解除申请，建议：继续限速 60km/h', 'PENDING'),
+(3, 2, 'REJECT', '赵铁军', '2026-09-22 10:00:00', '复测记录缺少轨检车签字，且限速原因未注明病害编号，退回补充整改', 'REJECTED'),
+(4, 2, 'RESUBMIT', '李长顺', '2026-09-23 02:10:00', '按最新现场重新提交，建议：继续限速 45km/h', 'PENDING'),
+(5, 3, 'SUBMIT', '赵铁军', '2026-09-23 05:30:00', '发起封锁解除申请，建议：继续限速 45km/h', 'PENDING'),
+(6, 3, 'INVALIDATE', '系统', '2026-09-24 12:00:00',
+ '复核失效：区段重级病害销号情况变化（病害 2 已销号、新增病害 5 未销号）', 'INVALID'),
+(7, 4, 'SUBMIT', '郑高原', '2026-09-19 03:15:00', '发起封锁解除申请，建议：恢复正常', 'PENDING'),
+(8, 4, 'APPROVE', '王建国', '2026-09-19 08:40:00', '复核通过，结论：恢复正常；意见：四项现场确认齐全，无未销号重级病害', 'APPROVED');
 
 INSERT INTO material (id, name, spec, unit, stock_qty, safety_stock) VALUES
 (1,  '60kg/m 钢轨',    'U71Mn 100m 定尺', '根', 86,  40),

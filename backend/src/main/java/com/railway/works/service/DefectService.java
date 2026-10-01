@@ -37,15 +37,18 @@ public class DefectService {
     private final InspectionRepository inspectionRepository;
     private final SectionRepository sectionRepository;
     private final ViewSupport viewSupport;
+    private final BlockReleaseService blockReleaseService;
 
     public DefectService(DefectRepository defectRepository,
                          InspectionRepository inspectionRepository,
                          SectionRepository sectionRepository,
-                         ViewSupport viewSupport) {
+                         ViewSupport viewSupport,
+                         BlockReleaseService blockReleaseService) {
         this.defectRepository = defectRepository;
         this.inspectionRepository = inspectionRepository;
         this.sectionRepository = sectionRepository;
         this.viewSupport = viewSupport;
+        this.blockReleaseService = blockReleaseService;
     }
 
     /** 病害清单：可按区段、严重等级、是否销号筛选 */
@@ -108,7 +111,12 @@ public class DefectService {
         defect.setDescription(req.getDescription().trim());
         defect.setFoundDate(foundDate);
         defect.setClosed(false);
-        return viewSupport.toView(defectRepository.save(defect));
+        Defect saved = defectRepository.save(defect);
+        // 新出现重级病害同样改变「未销号重级病害清单」，在途交接申请按规则失效
+        if ("HEAVY".equals(saved.getSeverity())) {
+            blockReleaseService.invalidateStaleFor(null, saved.getSectionId());
+        }
+        return viewSupport.toView(saved);
     }
 
     /** 病害销号 */
@@ -130,6 +138,11 @@ public class DefectService {
         defect.setClosed(true);
         defect.setCloseDate(closeDate);
         defect.setTreatment(treatment);
-        return viewSupport.toView(defectRepository.save(defect));
+        Defect saved = defectRepository.save(defect);
+        // 重级病害销号情况变化：该区段待复核/已退回的交接申请按规则失效
+        if ("HEAVY".equals(saved.getSeverity())) {
+            blockReleaseService.invalidateStaleFor(null, saved.getSectionId());
+        }
+        return viewSupport.toView(saved);
     }
 }

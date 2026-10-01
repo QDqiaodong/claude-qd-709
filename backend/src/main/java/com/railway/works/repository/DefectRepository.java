@@ -17,4 +17,7 @@ public interface DefectRepository extends JpaRepository<Defect, Long> {
     List<Defect> findAllBySeverityOrderByFoundDateAsc(String severity);
 
     List<Defect> findAllByClosedOrderByFoundDateAsc(Boolean closed);
+
+    /** 区段内某等级的未销号病害（交接失效检测用） */
+    List<Defect> findAllBySectionIdAndSeverityAndClosedFalseOrderByMileageAsc(Long sectionId, String severity);
 }

@@ -33,13 +33,16 @@ public class SectionService {
     private final SectionRepository sectionRepository;
     private final LineRepository lineRepository;
     private final ViewSupport viewSupport;
+    private final BlockReleaseService blockReleaseService;
 
     public SectionService(SectionRepository sectionRepository,
                           LineRepository lineRepository,
-                          ViewSupport viewSupport) {
+                          ViewSupport viewSupport,
+                          BlockReleaseService blockReleaseService) {
         this.sectionRepository = sectionRepository;
         this.lineRepository = lineRepository;
         this.viewSupport = viewSupport;
+        this.blockReleaseService = blockReleaseService;
     }
 
     @Transactional(readOnly = true)
@@ -119,6 +122,9 @@ public class SectionService {
             section.setSpeedLimit(section.getDesignSpeed());
         }
         section.setStatus(status);
-        return viewSupport.toView(sectionRepository.save(section));
+        Section saved = sectionRepository.save(section);
+        // 区段状态（含限速值）变化：该区段下待复核/已退回的交接申请按规则失效
+        blockReleaseService.invalidateStaleFor(null, saved.getId());
+        return viewSupport.toView(saved);
     }
 }

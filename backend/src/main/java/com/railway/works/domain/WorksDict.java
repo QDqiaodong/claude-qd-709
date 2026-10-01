@@ -111,6 +111,27 @@ public final class WorksDict {
     /** 天窗点单次最长时长（分钟），超过需分段提报 */
     public static final int MAX_WINDOW_MINUTES = 300;
 
+    // ---------------- 封锁解除交接 ----------------
+    /** 交接单状态：待复核 / 已通过 / 已退回 / 已失效 */
+    private static final Map<String, String> RELEASE_STATUS = Map.of(
+            "PENDING", "待复核",
+            "APPROVED", "已通过",
+            "REJECTED", "已退回",
+            "INVALID", "已失效");
+
+    /** 解除建议 / 复核结论：恢复正常 / 继续限速 / 继续封锁 */
+    private static final Map<String, String> RELEASE_DECISION = Map.of(
+            "NORMAL", "恢复正常",
+            "SPEED_LIMIT", "继续限速",
+            "BLOCKED", "继续封锁");
+
+    private static final Map<String, String> RELEASE_ACTION = Map.of(
+            "SUBMIT", "提交申请",
+            "RESUBMIT", "重新提交",
+            "REJECT", "退回整改",
+            "APPROVE", "复核通过",
+            "INVALIDATE", "复核失效");
+
     // ---------------- 物资机具 ----------------
     private static final Map<String, String> EQUIP_STATUS = Map.of(
             "AVAILABLE", "可用",
@@ -232,6 +253,27 @@ public final class WorksDict {
         return code != null && EQUIP_STATUS.containsKey(code);
     }
 
+    // ---------------- 封锁解除交接取值 ----------------
+
+    public static boolean isValidReleaseStatus(String code) {
+        return code != null && RELEASE_STATUS.containsKey(code);
+    }
+
+    public static String releaseStatusName(String code) {
+        return nameOf(RELEASE_STATUS, code);
+    }
+
+    public static boolean isValidReleaseDecision(String code) {
+        return code != null && RELEASE_DECISION.containsKey(code);
+    }
+
+    public static String releaseDecisionName(String code) {
+        return nameOf(RELEASE_DECISION, code);
+    }
+
+    public static String releaseActionName(String code) {
+        return nameOf(RELEASE_ACTION, code);
+    }
     public static String equipStatusName(String code) {
         return nameOf(EQUIP_STATUS, code);
     }
